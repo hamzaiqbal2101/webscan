@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""WebScan — Step 6: fetch one page, show its status code, title, same-site links,
-the state of its main security headers, the forms on the page, and probe them
-for reflected XSS and SQL injection clues.
+"""WebScan — Step 7: fetch one page, check its links, security headers and forms,
+probe them for reflected XSS and SQL injection clues, then print a findings
+report with a severity per finding and save it to a text file.
 
 Usage:
     python webscan.py <target-url>
@@ -141,6 +141,63 @@ def probe_sqli(base_url, forms):
     return findings
 
 
+def build_findings(headers, xss_findings, sqli_findings):
+    """Collect findings as (severity, title, detail) tuples."""
+    header_severity = {
+        "Strict-Transport-Security": "High",
+        "Content-Security-Policy": "Medium",
+        "X-Content-Type-Options": "Low",
+        "X-Frame-Options": "Medium",
+    }
+    findings = []
+    for name, value in check_headers(headers).items():
+        if value is None:
+            findings.append((
+                header_severity[name],
+                f"Missing security header: {name}",
+                "The server does not send this header.",
+            ))
+    for form_no, input_name in xss_findings:
+        findings.append((
+            "High",
+            f"Possible reflected XSS in Form {form_no}, input '{input_name}'",
+            "The harmless test string was reflected in the response.",
+        ))
+    for form_no, input_name in sqli_findings:
+        findings.append((
+            "High",
+            f"Possible SQL injection in Form {form_no}, input '{input_name}'",
+            "A single quote produced a database error message.",
+        ))
+    return findings
+
+
+def write_report(url, status, title, links, forms, findings, path="webscan-report.txt"):
+    """Build the report text, save it to a file, and return the text."""
+    lines = []
+    lines.append("WebScan Report")
+    lines.append("=" * 40)
+    lines.append(f"Target: {url}")
+    lines.append(f"Status: {status}")
+    lines.append(f"Title: {title}")
+    lines.append(f"Links found: {len(links)}")
+    lines.append(f"Forms found: {len(forms)}")
+    lines.append("")
+    lines.append(f"Findings ({len(findings)}):")
+    for severity, finding, detail in findings:
+        lines.append(f"[{severity}] {finding}")
+        lines.append(f"  {detail}")
+    lines.append("")
+    high = sum(1 for f in findings if f[0] == "High")
+    medium = sum(1 for f in findings if f[0] == "Medium")
+    low = sum(1 for f in findings if f[0] == "Low")
+    lines.append(f"Summary: {len(findings)} findings ({high} High, {medium} Medium, {low} Low)")
+    text = "\n".join(lines) + "\n"
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+    return text
+
+
 def main():
     if len(sys.argv) < 2:
         print("Usage: python webscan.py <target-url>")
@@ -178,26 +235,34 @@ def main():
         print(f"    inputs: {', '.join(form['inputs']) if form['inputs'] else '(none)'}")
 
     print(f"XSS probe (marker: {XSS_MARKER}):")
+    xss_findings = []
     if not forms:
         print("  No forms to probe.")
     else:
-        findings = probe_xss(url, forms)
-        if findings:
-            for form_no, input_name in findings:
+        xss_findings = probe_xss(url, forms)
+        if xss_findings:
+            for form_no, input_name in xss_findings:
                 print(f"  Possible reflected XSS in Form {form_no}, input '{input_name}'")
         else:
             print("  No reflections found.")
 
     print("SQLi probe (payload: '):")
+    sqli_findings = []
     if not forms:
         print("  No forms to probe.")
     else:
-        findings = probe_sqli(url, forms)
-        if findings:
-            for form_no, input_name in findings:
+        sqli_findings = probe_sqli(url, forms)
+        if sqli_findings:
+            for form_no, input_name in sqli_findings:
                 print(f"  Possible SQL injection in Form {form_no}, input '{input_name}'")
         else:
             print("  No database errors found.")
+
+    findings = build_findings(headers, xss_findings, sqli_findings)
+    report = write_report(url, status, get_title(html), links, forms, findings)
+    print()
+    print(report, end="")
+    print("Report saved to: webscan-report.txt")
 
 
 if __name__ == "__main__":
