@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""WebScan — Step 3: fetch one page, show its status code, title, same-site links
-and the state of its main security headers.
+"""WebScan — Step 4: fetch one page, show its status code, title, same-site links,
+the state of its main security headers, and the forms on the page.
 
 Usage:
     python webscan.py <target-url>
@@ -56,6 +56,24 @@ def check_headers(headers):
     return {name: headers.get(name) for name in SECURITY_HEADERS}
 
 
+def find_forms(html):
+    """Return a list of forms: {action, method, inputs} for each <form>."""
+    soup = BeautifulSoup(html, "html.parser")
+    forms = []
+    for form in soup.find_all("form"):
+        inputs = []
+        for field in form.find_all(["input", "textarea", "select"]):
+            name = field.get("name")
+            if name and name not in inputs:
+                inputs.append(name)
+        forms.append({
+            "action": form.get("action", ""),
+            "method": (form.get("method") or "get").lower(),
+            "inputs": inputs,
+        })
+    return forms
+
+
 def main():
     if len(sys.argv) < 2:
         print("Usage: python webscan.py <target-url>")
@@ -85,6 +103,12 @@ def main():
     print(f"Security headers ({len(missing)} missing):")
     for name, value in checked.items():
         print(f"  {name}: {value if value is not None else 'MISSING'}")
+
+    forms = find_forms(html)
+    print(f"Forms ({len(forms)}):")
+    for i, form in enumerate(forms, start=1):
+        print(f"  Form {i}: action={form['action']}, method={form['method']}")
+        print(f"    inputs: {', '.join(form['inputs']) if form['inputs'] else '(none)'}")
 
 
 if __name__ == "__main__":
