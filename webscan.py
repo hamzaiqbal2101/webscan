@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""WebScan — Step 4: fetch one page, show its status code, title, same-site links,
-the state of its main security headers, and the forms on the page.
+"""WebScan — Step 5: fetch one page, show its status code, title, same-site links,
+the state of its main security headers, the forms on the page, and probe them
+for reflected XSS clues with a harmless test string.
 
 Usage:
     python webscan.py <target-url>
@@ -74,6 +75,33 @@ def find_forms(html):
     return forms
 
 
+XSS_MARKER = "WebScanTest123"
+
+
+def probe_xss(base_url, forms):
+    """Probe each form input with a harmless marker.
+
+    Returns a list of (form number, input name) where the marker came back
+    in the response — a possible reflected XSS.
+    """
+    findings = []
+    for i, form in enumerate(forms, start=1):
+        action_url = urljoin(base_url, form["action"] or base_url)
+        for input_name in form["inputs"]:
+            data = {name: "test" for name in form["inputs"]}
+            data[input_name] = XSS_MARKER
+            try:
+                if form["method"] == "post":
+                    response = requests.post(action_url, data=data, timeout=10)
+                else:
+                    response = requests.get(action_url, params=data, timeout=10)
+            except requests.exceptions.RequestException:
+                continue
+            if XSS_MARKER in response.text:
+                findings.append((i, input_name))
+    return findings
+
+
 def main():
     if len(sys.argv) < 2:
         print("Usage: python webscan.py <target-url>")
@@ -109,6 +137,17 @@ def main():
     for i, form in enumerate(forms, start=1):
         print(f"  Form {i}: action={form['action']}, method={form['method']}")
         print(f"    inputs: {', '.join(form['inputs']) if form['inputs'] else '(none)'}")
+
+    print(f"XSS probe (marker: {XSS_MARKER}):")
+    if not forms:
+        print("  No forms to probe.")
+    else:
+        findings = probe_xss(url, forms)
+        if findings:
+            for form_no, input_name in findings:
+                print(f"  Possible reflected XSS in Form {form_no}, input '{input_name}'")
+        else:
+            print("  No reflections found.")
 
 
 if __name__ == "__main__":
