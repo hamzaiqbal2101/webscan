@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""WebScan — Step 2: fetch one page, show its status code, title and same-site links.
+"""WebScan — Step 3: fetch one page, show its status code, title, same-site links
+and the state of its main security headers.
 
 Usage:
     python webscan.py <target-url>
@@ -15,11 +16,18 @@ from urllib.parse import urljoin, urlparse
 import requests
 from bs4 import BeautifulSoup
 
+SECURITY_HEADERS = [
+    "Strict-Transport-Security",
+    "Content-Security-Policy",
+    "X-Content-Type-Options",
+    "X-Frame-Options",
+]
+
 
 def fetch_page(url):
-    """Fetch a page and return (status_code, html)."""
+    """Fetch a page and return (status_code, html, headers)."""
     response = requests.get(url, timeout=10)
-    return response.status_code, response.text
+    return response.status_code, response.text, response.headers
 
 
 def get_title(html):
@@ -43,6 +51,11 @@ def collect_links(html, base_url):
     return links
 
 
+def check_headers(headers):
+    """Return {header name: value or None} for the main security headers."""
+    return {name: headers.get(name) for name in SECURITY_HEADERS}
+
+
 def main():
     if len(sys.argv) < 2:
         print("Usage: python webscan.py <target-url>")
@@ -54,7 +67,7 @@ def main():
         url = "http://" + url
 
     try:
-        status, html = fetch_page(url)
+        status, html, headers = fetch_page(url)
     except requests.exceptions.RequestException as exc:
         print(f"Could not fetch {url}: {exc}")
         sys.exit(1)
@@ -66,6 +79,12 @@ def main():
     print(f"Links ({len(links)}):")
     for link in links:
         print(f"  {link}")
+
+    checked = check_headers(headers)
+    missing = [name for name, value in checked.items() if value is None]
+    print(f"Security headers ({len(missing)} missing):")
+    for name, value in checked.items():
+        print(f"  {name}: {value if value is not None else 'MISSING'}")
 
 
 if __name__ == "__main__":
