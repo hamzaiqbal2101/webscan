@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""WebScan — Step 5: fetch one page, show its status code, title, same-site links,
+"""WebScan — Step 6: fetch one page, show its status code, title, same-site links,
 the state of its main security headers, the forms on the page, and probe them
-for reflected XSS clues with a harmless test string.
+for reflected XSS and SQL injection clues.
 
 Usage:
     python webscan.py <target-url>
@@ -102,6 +102,45 @@ def probe_xss(base_url, forms):
     return findings
 
 
+SQL_ERROR_WORDS = [
+    "sql syntax",
+    "mysql",
+    "sqlite",
+    "postgresql",
+    "ora-",
+    "unclosed quotation mark",
+    "quoted string not properly terminated",
+    "odbc",
+    "jdbc",
+    "sqlstate",
+]
+
+
+def probe_sqli(base_url, forms):
+    """Probe each form input with a single quote.
+
+    Returns a list of (form number, input name) where the response contains
+    database error words — a possible SQL injection clue.
+    """
+    findings = []
+    for i, form in enumerate(forms, start=1):
+        action_url = urljoin(base_url, form["action"] or base_url)
+        for input_name in form["inputs"]:
+            data = {name: "test" for name in form["inputs"]}
+            data[input_name] = "'"
+            try:
+                if form["method"] == "post":
+                    response = requests.post(action_url, data=data, timeout=10)
+                else:
+                    response = requests.get(action_url, params=data, timeout=10)
+            except requests.exceptions.RequestException:
+                continue
+            text = response.text.lower()
+            if any(word in text for word in SQL_ERROR_WORDS):
+                findings.append((i, input_name))
+    return findings
+
+
 def main():
     if len(sys.argv) < 2:
         print("Usage: python webscan.py <target-url>")
@@ -148,6 +187,17 @@ def main():
                 print(f"  Possible reflected XSS in Form {form_no}, input '{input_name}'")
         else:
             print("  No reflections found.")
+
+    print("SQLi probe (payload: '):")
+    if not forms:
+        print("  No forms to probe.")
+    else:
+        findings = probe_sqli(url, forms)
+        if findings:
+            for form_no, input_name in findings:
+                print(f"  Possible SQL injection in Form {form_no}, input '{input_name}'")
+        else:
+            print("  No database errors found.")
 
 
 if __name__ == "__main__":
